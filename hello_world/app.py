@@ -1,44 +1,75 @@
 import json
+import os
+import uuid
+import boto3
 
-# import requests
+def get_dynamodb_resource():
+    # When running under 'sam local', SAM sets environment variables
+    # We target host.docker.internal to reach LocalStack running on your Mac host
+    endpoint_url = os.environ.get("DYNAMODB_ENDPOINT", "http://host.docker.internal:4566")
+    
+    return boto3.resource(
+        "dynamodb",
+        endpoint_url=endpoint_url,
+        region_name="us-east-1",
+        aws_access_key_id="test",
+        aws_secret_access_key="test"
+    )
 
 def lambda_handler(event, context):
-    # Extract query parameters (e.g. ?name=Cameron)
-    query_params = event.get("queryStringParameters") or {}
-    name = query_params.get("name", "Developer")
-    
-    # Parse incoming JSON body if it's a POST request
-    body_data = {}
-    if event.get("body"):
-        try:
-            body_data = json.loads(event["body"])
-        except json.JSONDecodeError:
-            pass
+    try:
+        dynamodb = get_dynamodb_resource()
+        table = dynamodb.Table("DevUsers")
+        http_method = event.get("httpMethod", "GET")
+
+        # Handle POST Request: Write Item to DynamoDB
+        if http_method == "POST":
+            body_data = {}
+            if event.get("body"):
+                try:
+                    body_data = json.loads(event["body"])
+                except json.JSONDecodeError:
+                    return {"statusCode": 400, "body": json.dumps({"error": "Invalid JSON"})}
+
+            user_id = str(uuid.uuid4())
+            item = {
+                "id": user_id,
+                "role": body_data.get("role", "Developer"),
+                "status": body_data.get("status", "active")
+            }
+
+            table.put_item(Item=item)
+
+            return {
+                "statusCode": 201,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "message": "User saved to DynamoDB!",
+                    "saved_item": item
+                })
+            }
+
+        # Handle GET Request: Fetch All Items
+        elif http_method == "GET":
+            response = table.scan()
+            items = response.get("Items", [])
+
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "count": len(items),
+                    "users": items
+                })
+            }
+
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)})
+        }
 
     return {
-        "statusCode": 200,
-        "headers": {
-            "Content-Type": "application/json"
-        },
-        "body": json.dumps({
-            "message": f"Welcome aboard, {name}!",
-            "received_body": body_data,
-            "http_method": event.get("httpMethod")
-        }),
-    }
-
-    # try:
-    #     ip = requests.get("http://checkip.amazonaws.com/")
-    # except requests.RequestException as e:
-    #     # Send some context about this error to Lambda Logs
-    #     print(e)
-
-    #     raise e
-
-    return {
-        "statusCode": 200,
-        "body": json.dumps({
-            "message": "hello world from RVA. LFGO NERDS !!!",
-            # "location": ip.text.replace("\n", "")
-        }),
+        "statusCode": 405,
+        "body": json.dumps({"error": "Method Not Allowed"})
     }
