@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AWS Developer Cert Practice Engine</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 680px; margin: 40px auto; padding: 20px; line-height: 1.6; background: #f9f9fb; }
+        .card { background: white; border: 1px solid #e1e4e8; border-radius: 10px; padding: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .question { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #f0f0f0; }
+        .question p { margin-bottom: 8px; font-weight: 600; color: #1a202c; }
+        label { display: block; margin: 8px 0; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
+        label:hover { background: #f7fafc; }
+        input[type="radio"] { margin-right: 10px; }
+        button { background: #0070f3; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; font-size: 16px; cursor: pointer; width: 100%; margin-top: 10px; }
+        button:hover { background: #0051a2; }
+        button:disabled { background: #a0aec0; cursor: not-allowed; }
+        #status { margin-top: 24px; padding: 16px; border-radius: 8px; display: none; }
+        .success { background: #e6fffa; color: #007d65; border: 1px solid #b2f5ea; }
+        .spinner { display: inline-block; animation: rotate 1s infinite linear; }
+        @keyframes rotate { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>⚡ AWS Developer Cert Practice Engine</h2>
+        <p><em>Asynchronous Queue Architecture Powered by SAM, SQS, Python, & DynamoDB</em></p>
+        <hr><br>
+        
+        <form id="quizForm">
+            <div class="question">
+                <p>1. Which AWS service provides fully managed asynchronous message queuing to decouple microservices?</p>
+                <label><input type="radio" name="q1" value="SQS" required> AWS SQS</label>
+                <label><input type="radio" name="q1" value="SNS"> AWS SNS</label>
+                <label><input type="radio" name="q1" value="EventBridge"> AWS EventBridge</label>
+            </div>
+
+            <div class="question">
+                <p>2. What happens to a message in SQS when a consumer pulls it off the queue for processing?</p>
+                <label><input type="radio" name="q2" value="Delete"> It is immediately deleted from the queue</label>
+                <label><input type="radio" name="q2" value="VisibilityTimeout" required> It enters a Visibility Timeout period</label>
+                <label><input type="radio" name="q2" value="Archive"> It moves to a Dead-Letter Queue automatically</label>
+            </div>
+
+            <div class="question">
+                <p>3. Which DynamoDB operation returns multiple items matching a primary key attribute efficiency?</p>
+                <label><input type="radio" name="q3" value="GetItem"> GetItem</label>
+                <label><input type="radio" name="q3" value="Query" required> Query</label>
+                <label><input type="radio" name="q3" value="Scan"> Scan</label>
+            </div>
+
+            <div class="question">
+                <p>4. How does AWS API Gateway handle high incoming traffic spikes safely?</p>
+                <label><input type="radio" name="q4" value="Throttling" required> Built-in throttling limits and request buffering</label>
+                <label><input type="radio" name="q4" value="ManualScale"> Manual server provisioning</label>
+                <label><input type="radio" name="q4" value="Drop"> Dropping packets above 100 req/sec</label>
+            </div>
+
+            <div class="question">
+                <p>5. What is the maximum execution timeout limit for an AWS Lambda function?</p>
+                <label><input type="radio" name="q5" value="5min"> 5 minutes</label>
+                <label><input type="radio" name="q5" value="15min" required> 15 minutes</label>
+                <label><input type="radio" name="q5" value="60min"> 60 minutes</label>
+            </div>
+
+            <button type="submit" id="submitBtn">Submit Quiz</button>
+        </form>
+
+        <div id="status"></div>
+    </div>
+
+    <script>
+        document.getElementById('quizForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const statusDiv = document.getElementById('status');
+            const submitBtn = document.getElementById('submitBtn');
+            
+            submitBtn.disabled = true;
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'success';
+            statusDiv.innerHTML = '⚡ Queuing submission in SQS...';
+
+            const payload = {
+                role: "AWS Dev Candidate",
+                answers: {
+                    q1: formData.get('q1'),
+                    q2: formData.get('q2'),
+                    q3: formData.get('q3'),
+                    q4: formData.get('q4'),
+                    q5: formData.get('q5')
+                }
+            };
+
+            try {
+                const res = await fetch('http://127.0.0.1:3000/hello', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await res.json();
+                statusDiv.innerHTML = `<span class="spinner">⚙️</span> <strong>Processing answers via SQS worker...</strong>`;
+                pollForResults(data.task_id);
+            } catch (err) {
+                submitBtn.disabled = false;
+                statusDiv.innerHTML = `❌ Error submitting: ${err.message}`;
+            }
+        });
+
+        async function pollForResults(taskId) {
+            const statusDiv = document.getElementById('status');
+            const submitBtn = document.getElementById('submitBtn');
+
+            const interval = setInterval(async () => {
+                try {
+                    const res = await fetch(`http://127.0.0.1:3000/hello?task_id=${taskId}`);
+                    if (res.status === 200) {
+                        const data = await res.json();
+                        clearInterval(interval);
+                        submitBtn.disabled = false;
+                        
+                        statusDiv.innerHTML = `
+                            🏆 <strong>Quiz Complete!</strong><br>
+                            <strong>Score:</strong> ${data.score} (${data.percentage})<br>
+                            <strong>Status:</strong> ${data.status}<br>
+                            <strong>Task ID:</strong> <code>${data.id}</code>
+                        `;
+                    }
+                } catch (err) {
+                    clearInterval(interval);
+                    submitBtn.disabled = false;
+                    statusDiv.innerHTML = `❌ Error fetching score: ${err.message}`;
+                }
+            }, 1000);
+        }
+    </script>
+</body>
+</html>

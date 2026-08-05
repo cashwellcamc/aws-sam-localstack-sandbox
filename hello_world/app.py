@@ -3,73 +3,100 @@ import os
 import uuid
 import boto3
 
-def get_dynamodb_resource():
-    # When running under 'sam local', SAM sets environment variables
-    # We target host.docker.internal to reach LocalStack running on your Mac host
-    endpoint_url = os.environ.get("DYNAMODB_ENDPOINT", "http://host.docker.internal:4566")
-    
-    return boto3.resource(
-        "dynamodb",
-        endpoint_url=endpoint_url,
-        region_name="us-east-1",
-        aws_access_key_id="test",
-        aws_secret_access_key="test"
-    )
+ENDPOINT_URL = os.environ.get("LOCALSTACK_ENDPOINT", "http://host.docker.internal:4566")
+
+sqs = boto3.client(
+    "sqs",
+    endpoint_url=ENDPOINT_URL,
+    region_name="us-east-1",
+    aws_access_key_id="test",
+    aws_secret_access_key="test"
+)
+
+dynamodb = boto3.resource(
+    "dynamodb",
+    endpoint_url=ENDPOINT_URL,
+    region_name="us-east-1",
+    aws_access_key_id="test",
+    aws_secret_access_key="test"
+)
+
+table = dynamodb.Table("DevUsers")
+QUEUE_URL = "http://host.docker.internal:4566/000000000000/DevQueue"
+
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
+    "Content-Type": "application/json"
+}
 
 def lambda_handler(event, context):
-    try:
-        dynamodb = get_dynamodb_resource()
-        table = dynamodb.Table("DevUsers")
-        http_method = event.get("httpMethod", "GET")
+    http_method = event.get("httpMethod", "GET")
 
-        # Handle POST Request: Write Item to DynamoDB
-        if http_method == "POST":
-            body_data = {}
-            if event.get("body"):
-                try:
-                    body_data = json.loads(event["body"])
-                except json.JSONDecodeError:
-                    return {"statusCode": 400, "body": json.dumps({"error": "Invalid JSON"})}
+    if http_method == "OPTIONS":
+        return {"statusCode": 200, "headers": CORS_HEADERS, "body": json.dumps({"message": "OK"})}
 
-            user_id = str(uuid.uuid4())
-            item = {
-                "id": user_id,
-                "role": body_data.get("role", "Developer"),
-                "status": body_data.get("status", "active")
-            }
+    # GET Request: Check Quiz Results by Task ID
+    if http_method == "GET":
+        query_params = event.get("queryStringParameters") or {}
+        task_id = query_params.get("task_id")
 
-            table.put_item(Item=item)
-
+        if not task_id:
             return {
-                "statusCode": 201,
-                "headers": {"Content-Type": "application/json"},
-                "body": json.dumps({
-                    "message": "User saved to DynamoDB!",
-                    "saved_item": item
-                })
+                "statusCode": 400,
+                "headers": CORS_HEADERS,
+                "body": json.dumps({"error": "Missing task_id query parameter"})
             }
 
-        # Handle GET Request: Fetch All Items
-        elif http_method == "GET":
-            response = table.scan()
-            items = response.get("Items", [])
+        response = table.get_item(Key={"id": task_id})
+        item = response.get("Item")
 
+        if not item:
             return {
-                "statusCode": 200,
-                "headers": {"Content-Type": "application/json"},
-                "body": json.dumps({
-                    "count": len(items),
-                    "users": items
-                })
+                "statusCode": 404,
+                "headers": CORS_HEADERS,
+                "body": json.dumps({"status": "PROCESSING", "message": "Quiz still in queue..."})
             }
 
-    except Exception as e:
         return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
+            "statusCode": 200,
+            "headers": CORS_HEADERS,
+            "body": json.dumps(item)
         }
 
-    return {
-        "statusCode": 405,
-        "body": json.dumps({"error": "Method Not Allowed"})
-    }
+    # POST Request: Queue Submission to SQS
+    if http_method == "POST":
+        body_data = {}
+        if event.get("body"):
+            try:
+                body_data = json.loads(event["body"])
+            except json.JSONDecodeError:
+                return {"statusCode": 400, "headers": CORS_HEADERS, "body": json.dumps({"error": "Invalid JSON"})}
+
+        message_payload = {
+            "task_id": str(uuid.uuid4()),
+            "role": body_data.get("role", "Quiz Taker"),
+            "answers": body_data.get("answers", {}),
+            "status": "QUEUED"
+        }
+
+        try:
+            response = sqs.send_message(
+                QueueUrl=QUEUE_URL,
+                MessageBody=json.dumps(message_payload)
+            )
+
+            return {
+                "statusCode": 202,
+                "headers": CORS_HEADERS,
+                "body": json.dumps({
+                    "message": "Quiz submission queued!",
+                    "task_id": message_payload["task_id"],
+                    "message_id": response.get("MessageId")
+                })
+            }
+        except Exception as e:
+            return {"statusCode": 500, "headers": CORS_HEADERS, "body": json.dumps({"error": str(e)})}
+
+    return {"statusCode": 405, "headers": CORS_HEADERS, "body": json.dumps({"error": "Method Not Allowed"})}
