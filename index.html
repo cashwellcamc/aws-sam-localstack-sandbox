@@ -4,71 +4,77 @@
     <meta charset="UTF-8">
     <title>AWS Developer Cert Practice Engine</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 680px; margin: 40px auto; padding: 20px; line-height: 1.6; background: #f9f9fb; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 760px; margin: 40px auto; padding: 20px; line-height: 1.6; background: #f9f9fb; }
         .card { background: white; border: 1px solid #e1e4e8; border-radius: 10px; padding: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-        .question { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #f0f0f0; }
+        .question { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid #f0f0f0; }
         .question p { margin-bottom: 8px; font-weight: 600; color: #1a202c; }
+        .code-block { background: #1e1e1e; color: #d4d4d4; padding: 12px 16px; border-radius: 6px; font-family: "Courier New", Courier, monospace; font-size: 13px; overflow-x: auto; margin: 10px 0; white-space: pre-wrap; }
         label { display: block; margin: 8px 0; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
         label:hover { background: #f7fafc; }
         input[type="radio"] { margin-right: 10px; }
+        input[type="text"] { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e0; border-radius: 6px; font-family: "Courier New", Courier, monospace; font-size: 14px; box-sizing: border-box; margin-top: 6px; }
+        input[type="text"]:focus { outline: none; border-color: #0070f3; box-shadow: 0 0 0 3px rgba(0, 112, 243, 0.15); }
         button { background: #0070f3; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; font-size: 16px; cursor: pointer; width: 100%; margin-top: 10px; }
         button:hover { background: #0051a2; }
         button:disabled { background: #a0aec0; cursor: not-allowed; }
-        #status { margin-top: 24px; padding: 16px; border-radius: 8px; display: none; }
-        .success { background: #e6fffa; color: #007d65; border: 1px solid #b2f5ea; }
-        .spinner { display: inline-block; animation: rotate 1s infinite linear; }
-        @keyframes rotate { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #status { margin-top: 24px; padding: 20px; border-radius: 8px; display: none; }
+        .success { background: #f0fff4; border: 1px solid #c6f6d5; color: #22543d; }
+        .result-item { margin-top: 12px; padding: 12px; border-radius: 6px; background: #fff; border-left: 4px solid #cbd5e0; }
+        .result-item.correct { border-left-color: #38a169; }
+        .result-item.incorrect { border-left-color: #e53e3e; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>⚡ AWS Developer Cert Practice Engine</h2>
-        <p><em>Asynchronous Queue Architecture Powered by SAM, SQS, Python, & DynamoDB</em></p>
+        <h2>⚡ AWS Developer Cert Practice Engine (DVA-C02)</h2>
+        <p><em>Dynamic Question Bank Powered by DynamoDB, SQS & SAM</em></p>
         <hr><br>
         
         <form id="quizForm">
-            <div class="question">
-                <p>1. Which AWS service provides fully managed asynchronous message queuing to decouple microservices?</p>
-                <label><input type="radio" name="q1" value="SQS" required> AWS SQS</label>
-                <label><input type="radio" name="q1" value="SNS"> AWS SNS</label>
-                <label><input type="radio" name="q1" value="EventBridge"> AWS EventBridge</label>
-            </div>
-
-            <div class="question">
-                <p>2. What happens to a message in SQS when a consumer pulls it off the queue for processing?</p>
-                <label><input type="radio" name="q2" value="Delete"> It is immediately deleted from the queue</label>
-                <label><input type="radio" name="q2" value="VisibilityTimeout" required> It enters a Visibility Timeout period</label>
-                <label><input type="radio" name="q2" value="Archive"> It moves to a Dead-Letter Queue automatically</label>
-            </div>
-
-            <div class="question">
-                <p>3. Which DynamoDB operation returns multiple items matching a primary key attribute efficiency?</p>
-                <label><input type="radio" name="q3" value="GetItem"> GetItem</label>
-                <label><input type="radio" name="q3" value="Query" required> Query</label>
-                <label><input type="radio" name="q3" value="Scan"> Scan</label>
-            </div>
-
-            <div class="question">
-                <p>4. How does AWS API Gateway handle high incoming traffic spikes safely?</p>
-                <label><input type="radio" name="q4" value="Throttling" required> Built-in throttling limits and request buffering</label>
-                <label><input type="radio" name="q4" value="ManualScale"> Manual server provisioning</label>
-                <label><input type="radio" name="q4" value="Drop"> Dropping packets above 100 req/sec</label>
-            </div>
-
-            <div class="question">
-                <p>5. What is the maximum execution timeout limit for an AWS Lambda function?</p>
-                <label><input type="radio" name="q5" value="5min"> 5 minutes</label>
-                <label><input type="radio" name="q5" value="15min" required> 15 minutes</label>
-                <label><input type="radio" name="q5" value="60min"> 60 minutes</label>
-            </div>
-
-            <button type="submit" id="submitBtn">Submit Quiz</button>
+            <div id="questionsContainer">Loading questions from DynamoDB...</div>
+            <button type="submit" id="submitBtn" style="display:none;">Submit Quiz</button>
         </form>
 
         <div id="status"></div>
     </div>
 
     <script>
+        let questionData = [];
+
+        async function loadQuestions() {
+            const container = document.getElementById('questionsContainer');
+            try {
+                const res = await fetch(`http://127.0.0.1:3000/questions?t=${Date.now()}`);
+                questionData = await res.json();
+
+                container.innerHTML = '';
+                questionData.forEach((q, index) => {
+                    const qDiv = document.createElement('div');
+                    qDiv.className = 'question';
+
+                    let content = `<p>${index + 1}. ${q.question}</p>`;
+                    if (q.code) {
+                        content += `<div class="code-block">${q.code}</div>`;
+                    }
+
+                    if (q.type === 'mc') {
+                        q.options.forEach(opt => {
+                            content += `<label><input type="radio" name="${q.q_id}" value="${opt}" required> ${opt}</label>`;
+                        });
+                    } else {
+                        content += `<input type="text" name="${q.q_id}" placeholder="Type exact answer..." required>`;
+                    }
+
+                    qDiv.innerHTML = content;
+                    container.appendChild(qDiv);
+                });
+
+                document.getElementById('submitBtn').style.display = 'block';
+            } catch (err) {
+                container.innerHTML = `<p style="color:red;">❌ Error loading question bank from DynamoDB: ${err.message}</p>`;
+            }
+        }
+
         document.getElementById('quizForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(e.target);
@@ -80,26 +86,20 @@
             statusDiv.className = 'success';
             statusDiv.innerHTML = '⚡ Queuing submission in SQS...';
 
-            const payload = {
-                role: "AWS Dev Candidate",
-                answers: {
-                    q1: formData.get('q1'),
-                    q2: formData.get('q2'),
-                    q3: formData.get('q3'),
-                    q4: formData.get('q4'),
-                    q5: formData.get('q5')
-                }
-            };
+            const answers = {};
+            questionData.forEach(q => {
+                answers[q.q_id] = formData.get(q.q_id);
+            });
 
             try {
                 const res = await fetch('http://127.0.0.1:3000/hello', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify({ role: "AWS Dev Candidate", answers })
                 });
                 
                 const data = await res.json();
-                statusDiv.innerHTML = `<span class="spinner">⚙️</span> <strong>Processing answers via SQS worker...</strong>`;
+                statusDiv.innerHTML = `⚙️ <strong>Processing answers via SQS worker...</strong>`;
                 pollForResults(data.task_id);
             } catch (err) {
                 submitBtn.disabled = false;
@@ -114,25 +114,44 @@
             const interval = setInterval(async () => {
                 try {
                     const res = await fetch(`http://127.0.0.1:3000/hello?task_id=${taskId}`);
-                    if (res.status === 200) {
+                    if (res.ok) {
                         const data = await res.json();
-                        clearInterval(interval);
-                        submitBtn.disabled = false;
-                        
-                        statusDiv.innerHTML = `
-                            🏆 <strong>Quiz Complete!</strong><br>
-                            <strong>Score:</strong> ${data.score} (${data.percentage})<br>
-                            <strong>Status:</strong> ${data.status}<br>
-                            <strong>Task ID:</strong> <code>${data.id}</code>
-                        `;
+                        if (data.status === 'COMPLETED') {
+                            clearInterval(interval);
+                            submitBtn.disabled = false;
+
+                            const breakdown = JSON.parse(data.breakdown || "[]");
+                            let breakdownHTML = `<br><h3>Exam Feedback & Analysis:</h3>`;
+                            
+                            breakdown.forEach(item => {
+                                const statusClass = item.correct ? 'correct' : 'incorrect';
+                                const icon = item.correct ? '✅' : '❌';
+                                breakdownHTML += `
+                                    <div class="result-item ${statusClass}">
+                                        <strong>${icon} ${item.question}</strong><br>
+                                        <span>Submitted: <code>${item.submitted || '(Empty)'}</code></span> | 
+                                        <span>Expected: <code>${item.expected}</code></span><br>
+                                        <small><em>Hint: ${item.hint}</em></small>
+                                    </div>
+                                `;
+                            });
+                            
+                            statusDiv.innerHTML = `
+                                🏆 <strong>Quiz Complete!</strong><br>
+                                <strong>Score:</strong> ${data.score} (${data.percentage})<br>
+                                <strong>Status:</strong> ${data.status}<br>
+                                ${breakdownHTML}
+                            `;
+                        }
                     }
                 } catch (err) {
-                    clearInterval(interval);
-                    submitBtn.disabled = false;
-                    statusDiv.innerHTML = `❌ Error fetching score: ${err.message}`;
+                    console.error("Polling error:", err);
                 }
             }, 1000);
         }
+
+        // Trigger dynamic fetch on page load
+        loadQuestions();
     </script>
 </body>
 </html>
